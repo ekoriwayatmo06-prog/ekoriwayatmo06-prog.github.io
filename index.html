@@ -84,6 +84,12 @@
         </header>
 
         <main class="p-6 flex-grow">
+            <!-- Alert Waktu (Hanya muncul jika belum jam 21.00) -->
+            <div id="time-warning" class="hidden mb-4 p-3 bg-orange-100 border border-orange-200 text-orange-800 rounded-xl flex items-center gap-3">
+                <i data-lucide="clock" class="w-5 h-5"></i>
+                <p class="text-xs font-bold uppercase tracking-tight">Presensi Baru Dibuka Jam 21.00 WIB</p>
+            </div>
+
             <!-- Kamera -->
             <div class="mb-6">
                 <label class="block text-gray-700 text-sm font-bold mb-3 flex items-center gap-2">
@@ -145,7 +151,7 @@
             </div>
 
             <button id="btn-submit" disabled class="w-full bg-green-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-2xl shadow-lg transform active:scale-95 transition-all flex items-center justify-center gap-3">
-                <i data-lucide="send" class="w-5 h-5"></i> KIRIM PRESENSI
+                <i data-lucide="send" class="w-5 h-5"></i> <span id="btn-text">KIRIM PRESENSI</span>
             </button>
         </main>
     </div>
@@ -163,6 +169,7 @@
     </div>
 
     <script>
+        // MASUKKAN URL GOOGLE APPS SCRIPT ANDA DI SINI
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzXyR3B-1tuF0G4srw7QFyZkXpj6Ig1sqtZOyFseDiHZKvvadgmKAcPXjgg5HAJxFOK8w/exec";
 
         let stream = null;
@@ -181,6 +188,9 @@
         const btnCapture = document.getElementById('btn-capture');
         const btnRetake = document.getElementById('btn-retake');
         const btnSubmit = document.getElementById('btn-submit');
+        const btnText = document.getElementById('btn-text');
+        const timeWarning = document.getElementById('time-warning');
+        
         const locationStatus = document.getElementById('location-status');
         const locationDetails = document.getElementById('location-details');
         const gpsDot = document.getElementById('gps-dot');
@@ -197,9 +207,9 @@
             setInterval(() => {
                 const now = new Date();
                 document.getElementById('current-time').innerText = now.toLocaleTimeString('id-ID', { hour12: false });
+                validateForm();
             }, 1000);
             
-            // Beri jeda sedikit untuk memastikan DOM siap
             setTimeout(() => {
                 initCamera();
                 getLocation();
@@ -211,30 +221,16 @@
             cameraSpinner.classList.remove('hidden');
             btnForceCamera.classList.add('hidden');
             loadingText.innerText = "Mengakses perangkat kamera...";
-
             try {
-                if (stream) {
-                    stream.getTracks().forEach(track => track.stop());
-                }
-                
-                const constraints = { 
-                    video: { 
-                        facingMode: "user",
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    }, 
-                    audio: false 
-                };
-                
+                if (stream) stream.getTracks().forEach(track => track.stop());
+                const constraints = { video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false };
                 stream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = stream;
-                
                 video.onloadedmetadata = () => {
                     video.play().catch(e => console.error("Video play failed:", e));
                     cameraLoading.classList.add('hidden');
                 };
             } catch (err) {
-                console.error("Camera Error:", err);
                 cameraSpinner.classList.add('hidden');
                 btnForceCamera.classList.remove('hidden');
                 loadingText.innerHTML = `<span class="text-red-600 font-bold">Kamera gagal diakses.</span><br><span class="text-[10px]">Pastikan izin kamera diberikan.</span>`;
@@ -245,46 +241,29 @@
         btnForceCamera.addEventListener('click', initCamera);
 
         function getLocation() {
-            if (!navigator.geolocation) {
-                gpsText.innerText = "GPS tidak didukung di browser ini.";
-                return;
-            }
-
+            if (!navigator.geolocation) return;
             gpsDot.className = "w-2 h-2 bg-blue-500 rounded-full animate-ping";
             gpsText.innerText = "Mencari GPS...";
             document.getElementById('gps-error-guide').classList.add('hidden');
-
-            const options = { 
-                enableHighAccuracy: true, 
-                timeout: 15000, 
-                maximumAge: 0 
-            };
-
+            const options = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
             const success = (pos) => {
                 userLocation = { lat: pos.coords.latitude, long: pos.coords.longitude };
                 latVal.innerText = userLocation.lat.toFixed(6);
                 longVal.innerText = userLocation.long.toFixed(6);
-                
                 gpsDot.className = "w-2 h-2 bg-green-500 rounded-full";
                 gpsText.innerHTML = `GPS Aktif ✓`;
                 locationStatus.className = "text-sm text-green-700 font-bold flex items-center gap-2";
-                
                 locationDetails.classList.remove('hidden');
                 document.getElementById('gps-error-guide').classList.add('hidden');
                 validateForm();
             };
-
-            const error = (err) => {
-                console.warn(`ERROR(${err.code}): ${err.message}`);
+            const error = () => {
                 gpsDot.className = "w-2 h-2 bg-red-500 rounded-full";
                 gpsText.innerText = "GPS bermasalah.";
                 document.getElementById('gps-error-guide').classList.remove('hidden');
                 lucide.createIcons();
             };
-
-            // Hentikan watch sebelumnya jika ada
             if (watchId) navigator.geolocation.clearWatch(watchId);
-            
             navigator.geolocation.getCurrentPosition(success, error, options);
             watchId = navigator.geolocation.watchPosition(success, error, options);
         }
@@ -293,55 +272,53 @@
         document.getElementById('btn-refresh-location').addEventListener('click', getLocation);
 
         btnCapture.addEventListener('click', () => {
-            if (!stream) {
-                alert("Kamera belum aktif.");
-                return;
-            }
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+            if (!stream) return;
+            canvas.width = video.videoWidth; canvas.height = video.videoHeight;
             const ctx = canvas.getContext('2d');
-            
-            // Efek mirror untuk selfie
-            ctx.translate(canvas.width, 0); 
-            ctx.scale(-1, 1);
+            ctx.translate(canvas.width, 0); ctx.scale(-1, 1);
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
             capturedImage = canvas.toDataURL('image/jpeg', 0.5);
             preview.src = capturedImage;
-            
-            video.classList.add('hidden');
-            preview.style.display = 'block';
-            btnCapture.classList.add('hidden');
-            btnRetake.classList.remove('hidden');
+            video.classList.add('hidden'); preview.style.display = 'block';
+            btnCapture.classList.add('hidden'); btnRetake.classList.remove('hidden');
             validateForm();
         });
 
         btnRetake.addEventListener('click', () => {
-            capturedImage = null;
-            video.classList.remove('hidden');
-            preview.style.display = 'none';
-            btnCapture.classList.remove('hidden');
-            btnRetake.classList.add('hidden');
+            capturedImage = null; video.classList.remove('hidden'); preview.style.display = 'none';
+            btnCapture.classList.remove('hidden'); btnRetake.classList.add('hidden');
             validateForm();
         });
 
         [studentNameInput, studentClassInput, studentNoInput].forEach(el => el.addEventListener('input', validateForm));
 
         function validateForm() {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const isTimeValid = currentHour >= 21; // Batasan Jam 21.00 WIB
+
             const isNameValid = studentNameInput.value.trim().length >= 3;
             const isClassValid = studentClassInput.value.trim() !== "";
             const isNoValid = studentNoInput.value.trim() !== "";
-            btnSubmit.disabled = !(capturedImage && userLocation && isNameValid && isClassValid && isNoValid);
+
+            if (!isTimeValid) {
+                btnSubmit.disabled = true;
+                btnText.innerText = "BELUM WAKTUNYA";
+                timeWarning.classList.remove('hidden');
+            } else {
+                timeWarning.classList.add('hidden');
+                btnText.innerText = "KIRIM PRESENSI";
+                btnSubmit.disabled = !(capturedImage && userLocation && isNameValid && isClassValid && isNoValid);
+            }
         }
 
         btnSubmit.addEventListener('click', async () => {
             if (btnSubmit.disabled) return;
             loadingOverlay.classList.remove('hidden');
             btnSubmit.disabled = true;
-
             const now = new Date();
             const mapsLink = `https://www.google.com/maps?q=${userLocation.lat},${userLocation.long}`;
-
+            
             const formData = new URLSearchParams();
             formData.append('nama', studentNameInput.value.trim());
             formData.append('kelas', studentClassInput.value.trim());
@@ -353,29 +330,21 @@
             formData.append('maps_link', mapsLink);
 
             try {
-                await fetch(SCRIPT_URL, {
-                    method: 'POST',
-                    mode: 'no-cors', 
-                    body: formData
-                });
-                
+                await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: formData });
                 loadingOverlay.classList.add('hidden');
                 document.getElementById('modal-success').classList.remove('hidden');
             } catch (err) {
                 loadingOverlay.classList.add('hidden');
-                alert("Terjadi kesalahan saat mengirim data. Pastikan koneksi internet stabil.");
+                alert("Terjadi kesalahan saat mengirim data.");
                 btnSubmit.disabled = false;
             }
         });
 
         function closeModal(id) {
             document.getElementById(id).classList.add('hidden');
-            studentNameInput.value = "";
-            studentClassInput.value = "";
-            studentNoInput.value = "";
+            studentNameInput.value = ""; studentClassInput.value = ""; studentNoInput.value = "";
             btnRetake.click();
         }
     </script>
 </body>
-
 </html>
